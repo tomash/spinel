@@ -75,8 +75,17 @@
 #include <stdint.h>
 #include <sys/mman.h>
 #include <time.h>
+#define SP_SLAB_IMPL   /* keeps the real sp_slab_on here under SP_NO_SLAB (sp_gc.h) */
 #include "sp_gc.h"
 #include "sp_alloc.h"   /* sp_gc_alloc is here: the collector's bookkeeping around the claim */
+/* SP_NO_SLAB (sp_gc.h): the allocation front below stays (it is the
+   program's sp_gc_alloc), but never takes the slab path, so the chunks,
+   bitmaps and per-worker tables leave the link with the rest. */
+#ifdef SP_NO_SLAB
+#define SP_SLAB_LIVE 0
+#else
+#define SP_SLAB_LIVE (sp_slab_on > 0)
+#endif
 #ifndef MAP_ANONYMOUS
 #define MAP_ANONYMOUS MAP_ANON
 #endif
@@ -688,8 +697,10 @@ static SP_INLINE void sp_slab_zero_small(void *p, unsigned csize) {
    current chunk, else refill; past the largest class, or with the slab
    off, malloc. */
 static SP_NOINLINE void *sp_slab_alloc_slow(size_t need, int payload, int zero) {
+#ifndef SP_NO_SLAB
   if (SP_EXPECT(sp_slab_on < 0, 0)) sp_slab_init();
-  if (sp_slab_on && need <= SP_SLAB_MAX) {
+#endif
+  if (SP_SLAB_LIVE && need <= SP_SLAB_MAX) {
     int cls = sp_slab_cls_of[(need + 15) >> 4];
     unsigned csize = sp_slab_csize[cls];
     sp_slab_worker *wk = &sp_slab_wk[SP_SLAB_WID()];
@@ -716,7 +727,7 @@ static SP_NOINLINE void *sp_slab_alloc_slow(size_t need, int payload, int zero) 
    cut (sp_slab_run), so the bitmap is not touched here; an object with a
    finalizer sets its fin bit, in the word cached beside the claim word. */
 static SP_INLINE void *sp_slab_alloc_in(size_t need, int payload, int fin, int zero) {
-  if (SP_EXPECT(sp_slab_on > 0 && need <= SP_SLAB_MAX, 1)) {
+  if (SP_EXPECT(SP_SLAB_LIVE && need <= SP_SLAB_MAX, 1)) {
     int cls = sp_slab_cls_of[(need + 15) >> 4];
     sp_slab_worker *wk = &sp_slab_wk[SP_SLAB_WID()];
     char *p = wk->rnext[payload][cls];
@@ -738,7 +749,7 @@ static SP_INLINE void *sp_slab_alloc_in(size_t need, int payload, int fin, int z
     }
   }
   void *p = sp_slab_alloc_slow(need, payload, zero);
-  if (fin && sp_slab_on > 0 && sp_slab_owns(p)) {
+  if (fin && SP_SLAB_LIVE && sp_slab_owns(p)) {
     sp_slab_loc l; sp_slab_locate(p, &l);
     bm_or(&l.bm->fin[l.w], l.bit);
   }
@@ -774,6 +785,9 @@ int sp_gc_alloc_fast_ok = 0;
 static void *sp_gc_alloc_full(size_t sz, void (*fin)(void *), void (*scn)(void *));
 void *sp_gc_alloc(size_t sz, void (*fin)(void *), void (*scn)(void *)) {
   size_t need = sizeof(sp_gc_hdr) + sz;
+#ifdef SP_NO_SLAB
+  (void)need; return sp_gc_alloc_full(sz, fin, scn);   /* no slab: the lean front never applies */
+#endif
   if (SP_EXPECT(!SP_GC_CTR_GET(sp_gc_alloc_fast_ok) || need > 256, 0)) return sp_gc_alloc_full(sz, fin, scn);
   if (SP_EXPECT(SP_GC_CTR_GET(sp_gc_bytes) > SP_GC_CTR_GET(sp_gc_threshold), 0)) return sp_gc_alloc_full(sz, fin, scn);
   int cls = sp_slab_cls_of[(need + 15) >> 4];
@@ -800,6 +814,9 @@ void *sp_gc_alloc(size_t sz, void (*fin)(void *), void (*scn)(void *)) {
    slab's had (#10651). */
 void *sp_gc_alloc_born(size_t sz) {
   size_t need = sizeof(sp_gc_hdr) + sz;
+#ifdef SP_NO_SLAB
+  (void)need; return sp_gc_alloc_full(sz, NULL, NULL);
+#endif
   if (SP_EXPECT(!SP_GC_CTR_GET(sp_gc_alloc_fast_ok) || need > 256, 0)) return sp_gc_alloc_full(sz, NULL, NULL);
   if (SP_EXPECT(SP_GC_CTR_GET(sp_gc_bytes) > SP_GC_CTR_GET(sp_gc_threshold), 0)) return sp_gc_alloc_full(sz, NULL, NULL);
   int cls = sp_slab_cls_of[(need + 15) >> 4];
@@ -873,7 +890,7 @@ static SP_NOINLINE void *sp_gc_alloc_full(size_t sz, void (*fin)(void *), void (
      allocation that came this way -- one past 256 bytes, a run that ran dry,
      a collection due -- and their next allocations missed on it. The byte
      count was made per-worker for the same reason (sp_gc_bytes_add). */
-  { int ok = sp_gc_stress_checked && sp_slab_on > 0 && !sp_slab_verify_on && !sp_alloc_report_on;
+  { int ok = sp_gc_stress_checked && SP_SLAB_LIVE && !sp_slab_verify_on && !sp_alloc_report_on;
     if (SP_GC_CTR_GET(sp_gc_alloc_fast_ok) != ok) SP_GC_CTR_SET(sp_gc_alloc_fast_ok, ok); }
   return (char *)h + sizeof(sp_gc_hdr);
 #else
@@ -893,7 +910,7 @@ static SP_NOINLINE void *sp_gc_alloc_full(size_t sz, void (*fin)(void *), void (
   if (SP_EXPECT(sp_alloc_report_on, 0)) sp_alloc_report_count((void *)scn, sz);
   SP_GC_HEAP_PUSH(h); sp_gc_bytes_add(need);
   if (SP_EXPECT(sp_slab_verify_on, 0)) sp_slab_note(h, 1);
-  SP_GC_CTR_SET(sp_gc_alloc_fast_ok, sp_gc_stress_checked && sp_slab_on > 0 && !sp_slab_verify_on && !sp_alloc_report_on);
+  SP_GC_CTR_SET(sp_gc_alloc_fast_ok, sp_gc_stress_checked && SP_SLAB_LIVE && !sp_slab_verify_on && !sp_alloc_report_on);
   SP_HEAP_UNLOCK();
   return (char *)h + sizeof(sp_gc_hdr);
 #endif
@@ -1252,6 +1269,9 @@ static void sp_slab_runs_release_worker(sp_slab_worker *wk) {
   }
 }
 void sp_slab_runs_release(void) {
+#ifdef SP_NO_SLAB
+  return;
+#endif
   if (sp_slab_on <= 0) return;
   for (int g = 0; g < (SP_SLAB_NWK + 63) / 64; g++) {
     for (uint64_t cut = bm_and(&sp_slab_cut[g], 0); cut; cut &= cut - 1)

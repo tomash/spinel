@@ -456,7 +456,11 @@ static inline void sp_gc_payload_resize(void *obj, size_t from, size_t to) {
    address falls inside it, which the allocation fast paths test inline. */
 extern uintptr_t sp_slab_base;
 extern size_t sp_slab_cap;
+#if defined(SP_NO_SLAB) && !defined(SP_SLAB_IMPL)
+static inline int sp_slab_owns(const void *p) { (void)p; return 0; }   /* no range: see SP_NO_SLAB below */
+#else
 static inline int sp_slab_owns(const void *p) { return (uintptr_t)p - sp_slab_base < sp_slab_cap; }
+#endif
 /* Only a block the slab does not hold goes on a list: a slab block's
    generation is a bit in its chunk's bitmaps, set by the allocation itself
    (lib/sp_slab.c), and the lists carry what fell back to malloc. */
@@ -522,7 +526,56 @@ void  sp_slab_each_string(int young, int old, void (*fn)(void *hdr, void *arg), 
 void  sp_slab_release(void);
 void  sp_slab_release_worker(int wid);   /* one worker's lists, by their owner, beside the program */
 void  sp_slab_release_from(int first);   /* the slots from `first` on, under the barrier */
+#if defined(SP_NO_SLAB) && !defined(SP_SLAB_IMPL)
+/* SP_NO_SLAB: what each entry point does when the slab is off at run time
+   (sp_slab_on 0, no range), said where the compiler can see it, so the
+   callers fold and lib/sp_slab.c keeps only the allocation front. Each name
+   is redirected to a static inline (a later plain redeclaration, as the
+   cold-path files make, takes its internal linkage). */
+#include <stdlib.h>
+#include <string.h>
+static inline void *sp_slab_alloc_off(size_t need) { return calloc(1, need); }
+static inline void *sp_slab_alloc_raw_off(size_t need) { return malloc(need); }
+static inline void sp_slab_free_off(void *p) { free(p); }
+static inline void sp_slab_hdr_off(void *h) { (void)h; }
+static inline int sp_slab_query_off(const void *p) { (void)p; return 0; }
+static inline void sp_slab_ptr_off(const void *p) { (void)p; }
+static inline void sp_slab_void_off(void) { }
+static inline void sp_slab_int_off(int i) { (void)i; }
+static inline void sp_slab_each_off(int young, int old, void (*fn)(void *hdr, void *arg), void *arg) { (void)young; (void)old; (void)fn; (void)arg; }
+static inline void sp_slab_sweep_worker_off(int wid, int full, int aging, int (*die)(void *hdr), sp_slab_sweep_stats *st) {
+  (void)wid; (void)full; (void)aging; (void)die; if (st) memset(st, 0, sizeof *st);
+}
+#define sp_slab_alloc            sp_slab_alloc_off
+#define sp_slab_alloc_raw        sp_slab_alloc_raw_off
+#define sp_slab_free             sp_slab_free_off
+#define sp_slab_set_fin          sp_slab_hdr_off
+#define sp_slab_park             sp_slab_hdr_off
+#define sp_slab_relive           sp_slab_hdr_off
+#define sp_slab_is_live          sp_slab_query_off
+#define sp_slab_is_old           sp_slab_query_off
+#define sp_slab_is_quarantined   sp_slab_query_off
+#define sp_slab_describe         sp_slab_ptr_off
+#define sp_slab_history          sp_slab_ptr_off
+#define sp_slab_verify_all       sp_slab_void_off
+#define sp_slab_quarantine_trim  sp_slab_void_off
+#define sp_slab_runs_release     sp_slab_void_off
+#define sp_slab_release          sp_slab_void_off
+#define sp_slab_release_worker   sp_slab_int_off
+#define sp_slab_release_from     sp_slab_int_off
+#define sp_slab_each_object      sp_slab_each_off
+#define sp_slab_each_string      sp_slab_each_off
+#define sp_slab_sweep_worker     sp_slab_sweep_worker_off
+#endif
 extern int sp_slab_on;
+#if defined(SP_NO_SLAB) && !defined(SP_SLAB_IMPL)
+/* MCU builds: the slab needs an address-space reservation (mmap or a 4 MB
+   aligned block) that a part with tens of KB never has, so at run time it
+   switches itself off and every block is a malloc. Saying so at compile
+   time folds every `sp_slab_on > 0` test, and the slab's code and its
+   per-worker tables leave the link. */
+#define sp_slab_on 0
+#endif
 
 /* ---- Collector entry points (defined in lib/sp_gc.c) ---- */
 int  sp_gc_verify_on(void);   /* SPINEL_GC_VERIFY is set (diagnostics only) */
