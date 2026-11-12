@@ -157,9 +157,10 @@ static size_t sp_gc_max_bytes = 0;
 static int sp_gc_max_bytes_init = 0;
 #define SP_GC_FULL_INTERVAL 8
 #define SP_GC_FULL_INTERVAL_MIN 1   /* the adaptive floor under the minor mark: every cycle full */
-#define SP_GC_PROMOTED_DEAD_CUT (1.0/16.0)   /* dead-at-full per minor, as a share of the live set */
+#define SP_GC_PROMOTED_DEAD_CUT (1024/16)   /* dead-at-full per minor, as a share of the live set, in 1/1024ths
+                                             (fixed point: no soft-float on FPU-less parts) */
 static int sp_gc_minors_since_full = 0;
-static double sp_gc_last_per_minor = 0;
+static unsigned long long sp_gc_last_per_minor = 0;   /* 1/1024ths */
 static int sp_gc_fulls_at_min = 0;
 
 /* Major-collection cadence. A compile-time constant until the measurements in
@@ -297,7 +298,9 @@ SP_CONSTRUCTOR static void sp_gc_debug_env(void){
      collection is per allocation; SPINEL_GC_VERIFY=1 beside it adds them.
      The thresholds are sp_alloc.c's to set. */
   { const char *st=getenv("SPINEL_GC_STRESS"); if(st&&atoi(st)>=2){ if(!sp_gc_verify)sp_gc_verify=2; sp_slab_quar_on=1; } }
+#ifndef SP_NO_GC_PHASES
   { const char *ph=getenv("SPINEL_GC_PHASES"); sp_gc_ph_on=(ph&&*ph&&*ph!='0'); }
+#endif
   { const char *fi=getenv("SPINEL_GC_FULL_INTERVAL");
     if(fi&&*fi){ int n=atoi(fi); if(n>0&&n<=4096){ sp_gc_full_interval=n; sp_gc_full_interval_fixed=1; } } }
   { const char *g=getenv("SPINEL_GC_VERIFY_GEN"); sp_gc_verify_gen=(g&&*g&&*g!='0');
@@ -1111,12 +1114,14 @@ unsigned long long sp_gc_ph_mk_helpers = 0, sp_gc_ph_mk_drains = 0;
 double sp_gc_ph_conc_wait = 0, sp_gc_ph_conc_wall = 0, sp_gc_ph_barrier = 0, sp_gc_ph_park = 0, sp_gc_ph_apply_obj = 0, sp_gc_ph_apply_str = 0, sp_gc_ph_apply_release = 0; unsigned long long sp_gc_ph_conc_waits = 0;   /* joining the previous sweep under the barrier */
 double sp_gc_ph_mk_roots = 0, sp_gc_ph_mk_fibers = 0,
        sp_gc_ph_mk_globals = 0, sp_gc_ph_mk_scan = 0;
+#ifndef SP_NO_GC_PHASES
 int sp_gc_ph_on = 0;
+#endif
 unsigned long long sp_gc_stat_collections=0;
 unsigned long long sp_gc_stat_fulls=0;
 double sp_gc_stat_seconds=0;
 static double sp_gc_stat_now(void){
-#if defined(CLOCK_MONOTONIC)
+#if defined(CLOCK_MONOTONIC) && !defined(SP_NO_GC_PHASES)
   struct timespec ts; clock_gettime(CLOCK_MONOTONIC,&ts);
   return (double)ts.tv_sec+(double)ts.tv_nsec*1e-9;
 #else
@@ -1135,6 +1140,11 @@ static double sp_gc_stat_now(void){
    32-worker box, so once a second is the cadence (SPINEL_GC_TRIM_SEC). */
 unsigned long long sp_gc_ph_trim_req = 0, sp_gc_ph_trim_inline = 0; double sp_gc_ph_trim_inline_t = 0;
 static void sp_gc_trim_request(void){
+#ifdef SP_NO_GC_PHASES
+  /* MCU builds: no clock to pace it by, and nothing for malloc_trim to hand
+     back to an OS. */
+  return;
+#endif
   static double last_trim=0, trim_every=-1;
   if(trim_every<0){ const char*e=getenv("SPINEL_GC_TRIM_SEC"); trim_every=(e&&*e)?atof(e):1.0; }
   double now=sp_gc_stat_now();
@@ -1710,7 +1720,7 @@ void sp_gc_collect(void){
          minor never runs; below it the survival rule above governs. */
       if(sp_gc_minor_on&&kept>0&&sp_gc_minors_since_full>0){
         size_t dead=old_before>kept?old_before-kept:0;
-        double per_minor=(double)dead/(double)kept/(double)sp_gc_minors_since_full;
+        unsigned long long per_minor=(unsigned long long)dead*1024/((unsigned long long)kept*(unsigned long long)sp_gc_minors_since_full);
         sp_gc_last_per_minor=per_minor;
         if(per_minor>SP_GC_PROMOTED_DEAD_CUT){
           if(sp_gc_full_interval>SP_GC_FULL_INTERVAL_MIN) sp_gc_full_interval/=2;
@@ -1772,7 +1782,9 @@ void sp_gc_collect(void){
     SP_GC_PH(sp_gc_ph_trim);
     sp_gc_stat_collections++;
     if(full)sp_gc_stat_fulls++;
+#ifndef SP_NO_GC_PHASES
     sp_gc_stat_seconds+=sp_gc_stat_now()-stat_t0;
+#endif
     if(sp_gc_obj_retune_hook)sp_gc_obj_retune_hook(ob_before);
     return;
   }
@@ -1952,7 +1964,9 @@ void sp_gc_collect(void){
      this collection, not the previous one. */
   sp_gc_stat_collections++;
   if(full)sp_gc_stat_fulls++;
+#ifndef SP_NO_GC_PHASES
   sp_gc_stat_seconds+=sp_gc_stat_now()-stat_t0;
+#endif
   if(sp_gc_obj_retune_hook)sp_gc_obj_retune_hook(ob_before);
   /* the finalizers of what this collection freed wait for the program's
      next safe point (SP_FIN_POLL): the allocation that brought us here may

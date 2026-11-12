@@ -579,7 +579,13 @@ extern double sp_gc_ph_mk_drain, sp_gc_ph_mk_join, sp_gc_ph_mk_idle;
 extern double sp_gc_ph_conc_wait, sp_gc_ph_conc_wall, sp_gc_ph_barrier, sp_gc_ph_park, sp_gc_ph_apply_obj, sp_gc_ph_apply_str, sp_gc_ph_apply_release; extern unsigned long long sp_gc_ph_conc_waits;
 extern double sp_gc_ph_mk_roots, sp_gc_ph_mk_fibers,
               sp_gc_ph_mk_globals, sp_gc_ph_mk_scan;
+#ifdef SP_NO_GC_PHASES
+/* MCU builds: the phase clock (double seconds, SPINEL_GC_PHASES) folds away,
+   and with it the soft-float arithmetic it pulls into the collector. */
+#define sp_gc_ph_on 0
+#else
 extern int sp_gc_ph_on;
+#endif
 void sp_gc_collect(void);
 /* the collector the program installs; NULL under --gc=none (sp_alloc.c) */
 extern void (*sp_gc_collect_fn)(void);
