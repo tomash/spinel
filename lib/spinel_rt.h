@@ -22259,7 +22259,7 @@ static SP_UNUSED void sp_sig_install_defaults(void) {
   sp_sig_default_raiser = sp_sig_default_raise;
   for (int i = 0; i < 2; i++) {
     int no = sigs[i];
-    if (sp_trap_proc[no] || sp_trap_state[no]) continue;
+    if (no >= SP_SIG_MAX || sp_trap_proc[no] || sp_trap_state[no]) continue;
     struct sigaction sa; memset(&sa, 0, sizeof sa);
     sa.sa_handler = sp_sig_default_handler;
     sigemptyset(&sa.sa_mask);

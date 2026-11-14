@@ -36,11 +36,16 @@
 #define backtrace(buf, sz) 0
 #endif
 #define SP_BT_AVAILABLE 1
+/* frames a raise keeps (sp_bt_buf); -DSP_BT_MAX=<n> on a small-RAM target,
+   the SAME value for the runtime and the generated TU */
+#ifndef SP_BT_MAX
+#define SP_BT_MAX 256
+#endif
 extern int sp_bt_enabled;          /* set to 1 by debug-build main(); defined in lib/sp_cold.c */
 extern const char *sp_bt_srcfile;  /* toplevel .rb path, set by debug main() */
 extern const char *const *sp_bt_files;  /* debug main(): C symbol, .rb file pairs of the methods of a required file, 0 ends */
 #if SP_BT_AVAILABLE
-extern void *sp_bt_buf[256];       /* frames captured at the last raise; lib/sp_cold.c */
+extern void *sp_bt_buf[SP_BT_MAX];       /* frames captured at the last raise; lib/sp_cold.c */
 extern int sp_bt_n;
 #endif
 

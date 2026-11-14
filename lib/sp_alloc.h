@@ -158,8 +158,14 @@ static inline size_t sp_file_path_root_len(const char *p) {
 /* Two ways per bucket: a scan loop reading one string while measuring another
    (a CSV parser walking the input and its field buffer) collided on every
    character with a direct-mapped table and rescanned both strings each time. */
+/* -DSP_STR_LCACHE_BITS=<n> / -DSP_STR_LCACHE_WAYS=<n> shrink the cache on a
+   small-RAM target (the same values for the runtime and the generated TU) */
+#ifndef SP_STR_LCACHE_BITS
 #define SP_STR_LCACHE_BITS 6
+#endif
+#ifndef SP_STR_LCACHE_WAYS
 #define SP_STR_LCACHE_WAYS 2
+#endif
 #define SP_STR_LCACHE_SIZE ((1u << SP_STR_LCACHE_BITS) * SP_STR_LCACHE_WAYS)
 struct sp_str_lcache_entry {
   const char *s;

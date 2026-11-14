@@ -12,6 +12,7 @@ char *codegen_program(const NodeTable *nt);
    table with the functions it summarizes, or print it from them, after the
    program's analysis, then stop */
 extern int g_check_traits, g_dump_traits;
+extern int g_proc_arg_slots;   /* --proc-arg-slots (codegen.c) */
 
 /* Write `text` to `path`: 1, or 0 with a warning on stderr */
 int write_text_file(const char *path, const char *text);

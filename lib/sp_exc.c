@@ -32,6 +32,10 @@ static const struct { unsigned short off; short id; } sp_bcls_rows[] = { SP_BUIL
 #undef X
 #define SP_BCLS_NAME(i) ((const char *)&sp_bcls_names + sp_bcls_rows[i].off)
 #define SP_BCLS_NROWS ((int)(sizeof sp_bcls_rows / sizeof sp_bcls_rows[0]))
+#ifndef SP_CLASS_NAME_HASH
+#define SP_CLASS_NAME_HASH 1   /* -DSP_CLASS_NAME_HASH=0: a small-RAM target scans the rows (a lookup is a raise's, not a loop's) */
+#endif
+#if SP_CLASS_NAME_HASH
 #define SP_BCLS_SLOTS 256   /* a power of two, over twice the rows */
 _Static_assert(SP_BCLS_SLOTS >= 2 * (int)(sizeof sp_bcls_rows / sizeof sp_bcls_rows[0]), "raise SP_BCLS_SLOTS");
 static unsigned char sp_bcls_slot[SP_BCLS_SLOTS];
@@ -61,6 +65,13 @@ int sp_builtin_class_id_of(const char *n) {
     if (!strcmp(n, SP_BCLS_NAME(sp_bcls_slot[h] - 1))) return sp_bcls_rows[sp_bcls_slot[h] - 1].id;
   return -1;
 }
+#else
+int sp_builtin_class_id_of(const char *n) {
+  for (int i = 0; i < SP_BCLS_NROWS; i++)
+    if (sp_bcls_rows[i].id && !strcmp(n, SP_BCLS_NAME(i))) return sp_bcls_rows[i].id;
+  return -1;
+}
+#endif
 
 /* Check if exception class name `raised` is the same as or a subclass of
    `target`, using both the built-in hierarchy and the user hierarchy callback. */
@@ -191,7 +202,12 @@ static short sp_exc_parent_id[SP_EXC_ID_SPAN];
 /* The kept name (sp_exc_class_name) of each builtin exception class, by the
    same ids, filled on first use: a class name question about a builtin
    exception then costs a load, not a locked table walk. */
+#ifndef SP_EXC_NAME_CACHE
+#define SP_EXC_NAME_CACHE 1   /* -DSP_EXC_NAME_CACHE=0: a small-RAM target keeps the walk */
+#endif
+#if SP_EXC_NAME_CACHE
 static const char *sp_exc_id_name[SP_EXC_ID_SPAN];
+#endif
 static int sp_exc_hier_state;   /* 0 not built, 1 a thread is building it, 2 built */
 /* Built on the first question that reads it, so a program that never raises
    pays nothing at start; one thread builds, the others wait for it. */
@@ -758,10 +774,12 @@ const char *sp_exc_class_name(volatile sp_Exception *ve) {
   if (!e->cls_name) return SPL("RuntimeError");
   /* a builtin class's kept name, found by its id once the table below has it */
   int idx = SP_EXC_IX_OK(e->cls_id) ? SP_EXC_IX(e->cls_id) : -1;
+#if SP_EXC_NAME_CACHE
   if (idx >= 0) {
     const char *k = SP_ATOMIC_LOAD(&sp_exc_id_name[idx], __ATOMIC_ACQUIRE);
     if (k) return k;
   }
+#endif
   name = e->cls_name;
   /* A name with no header is a literal, or a copy kept here: its address
      names it, and the table is keyed by address. A heap name (a class
@@ -812,7 +830,9 @@ const char *sp_exc_class_name(volatile sp_Exception *ve) {
   SP_HEAP_UNLOCK();
 #undef SP_KEPT_SLOT
   /* the kept copy is the name's one copy, so every thread stores the same pointer */
+#if SP_EXC_NAME_CACHE
   if (r && idx >= 0) SP_ATOMIC_STORE(&sp_exc_id_name[idx], r, __ATOMIC_RELEASE);
+#endif
   return r ? r : sp_str_dup_external(e->cls_name);   /* out of memory */
 }
 const char *sp_exc_msg_text(volatile sp_Exception *ve) {
@@ -1962,7 +1982,7 @@ SP_NORETURN SP_COLD void sp_raise_cls(const char *cls, const char *msg) {
 #if SP_BT_AVAILABLE
   /* A pass-through, a bare raise, or an ensure resuming its saved exception
      keeps the frames of the raise that made it, as CRuby does. */
-  if (sp_bt_enabled && !sp_bt_keep && !sp_reraise_current && !cont) sp_bt_n = sp_bt_capture(sp_bt_buf, 256);
+  if (sp_bt_enabled && !sp_bt_keep && !sp_reraise_current && !cont) sp_bt_n = sp_bt_capture(sp_bt_buf, SP_BT_MAX);
 #endif
   sp_bt_keep = 0;
   /* A real exception supersedes any non-local unwind in flight (e.g. raised from
@@ -2061,7 +2081,7 @@ SP_NORETURN SP_COLD void sp_raise_cls(const char *cls, const char *msg) {
   sp_StrArray *_bt_obj = (sp_bt_enabled && sp_pending_exc_obj)
     ? ((sp_Exception *)sp_pending_exc_obj)->backtrace : NULL;
   if (_bt_obj) _sp_gc_root_push((void **)&_bt_obj);
-  void *_bt_keep[256];
+  void *_bt_keep[SP_BT_MAX];
   int _bt_keep_n = (sp_bt_enabled && sp_bt_n > 0) ? sp_bt_n : 0;
   if (_bt_keep_n > 0) memcpy(_bt_keep, sp_bt_buf, sizeof(void *) * (size_t)_bt_keep_n);
 #endif

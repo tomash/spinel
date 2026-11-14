@@ -22584,7 +22584,10 @@ static void emit_sym_class_name_rt(Compiler *c, Buf *b) {
                   "memcpy(np,sp_dyn_syms,sizeof(*np)*(size_t)sp_ndyn);"
                   "%s;sp_dyn_cap=nc;}\n",
                oom_raise, mt ? "SP_ATOMIC_STORE(&sp_dyn_syms,np,__ATOMIC_RELEASE)" : "sp_dyn_syms=np");
-    buf_puts(b, "static uint32_t sp_dsym_ix0[1+2*64]={63}; static uint32_t *sp_dsym_ix=sp_dsym_ix0;\n");
+    /* the first index's slots, a power of two (-DSP_DSYM_IX_SLOTS=<n> on a
+       small-RAM target); it grows on the heap past half full */
+    buf_puts(b, "#ifndef SP_DSYM_IX_SLOTS\n#define SP_DSYM_IX_SLOTS 64\n#endif\n"
+                "static uint32_t sp_dsym_ix0[1+2*SP_DSYM_IX_SLOTS]={SP_DSYM_IX_SLOTS-1}; static uint32_t *sp_dsym_ix=sp_dsym_ix0;\n");
     buf_printf(b, "static SP_NOINLINE SP_COLD void sp_dsym_ix_grow(void){"
                   "uint32_t *o=sp_dsym_ix;uint32_t om=o[0],nm=om*2u+1u;"
                   "uint32_t *nx=(uint32_t *)calloc(1u+2u*((size_t)nm+1u),sizeof(uint32_t));"
@@ -23248,6 +23251,8 @@ static void emit_user_exc_dispatch(Compiler *c, Buf *b) {
   }
 }
 
+int g_proc_arg_slots = 64;
+
 static void emit_runtime_include(Compiler *c, Buf *b, int blank) {
   /* sp_feature_required, not strict require: without SPINEL_STRICT_REQUIRE,
      respond_to?'s io/console answer must still follow the program's require,
@@ -23255,6 +23260,9 @@ static void emit_runtime_include(Compiler *c, Buf *b, int blank) {
   if (sp_feature_required("io/console"))
     buf_puts(b, "#define SP_FEATURE_IO_CONSOLE 1\n");
   buf_puts(b, "#include \"spinel_rt.h\"\n");
+  if (g_proc_arg_slots != 64)
+    buf_printf(b, "#if SP_PROC_ARG_SLOTS != %d\n#error \"built with --proc-arg-slots=%d: compile the runtime and this file with -DSP_PROC_ARG_SLOTS=%d\"\n#endif\n",
+               g_proc_arg_slots, g_proc_arg_slots, g_proc_arg_slots);
   if (blank) buf_puts(b, "\n");
 }
 

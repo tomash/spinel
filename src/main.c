@@ -567,6 +567,9 @@ static void usage(void) {
     "              raise on overflow, a value that could only be a Bignum is a\n"
     "              compile error; the bigint runtime leaves the link (small\n"
     "              targets; docs/int-overflow.md)\n"
+    "  --proc-arg-slots=N  Boxed proc arguments passed in static slots, 16..64\n"
+    "              (default 64; more ride a heap store). For small-RAM targets: build\n"
+    "              the runtime with -DSP_PROC_ARG_SLOTS=N to match\n"
     "  --dump-ast  Print the text AST and exit (debug)\n"
     "  --dump-load-graph  Print the files the program loads and what each require\n"
     "              resolves to, and exit (debug)\n"
@@ -1014,6 +1017,11 @@ int main(int argc, char **argv) {
     }
     else if (!strncmp(a, "--int-overflow=", 15)) { int_overflow = a + 15; i++; }
     else if (sp_streq(a, "--no-bigint"))   { no_bigint = 1; i++; }
+    else if (strncmp(a, "--proc-arg-slots=", 17) == 0) {
+      int n = atoi(a + 17);
+      if (n < 16 || n > 64) { fprintf(stderr, "spinel: --proc-arg-slots wants 16..64\n"); return 1; }   /* the spread and clearing paths use 16 */
+      g_proc_arg_slots = n; i++;
+    }
     else if (sp_streq(a, "--int-overflow")) { if (++i < argc) int_overflow = argv[i]; i++; }
     else if (sp_streq(a, "-o"))            { if (++i < argc) output = argv[i]; i++; }
     else if (sp_streq(a, "--link"))        { if (++i < argc) link_extra[n_link_extra++] = argv[i]; i++; }

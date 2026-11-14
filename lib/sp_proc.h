@@ -39,7 +39,11 @@ sp_int sp_proc_call(sp_Proc *p, sp_int argc, sp_int *args);   /* defined in the 
    number in any of them is a call whose arguments are published and never
    marked, or marked and never passed. Machine-generated code reaches 17
    parameters and the old 16 refused it outright. */
+#ifndef SP_PROC_ARG_SLOTS   /* -DSP_PROC_ARG_SLOTS=N with spinel --proc-arg-slots=N */
 #define SP_PROC_ARG_SLOTS 64
+#endif
+/* the array-spread, clearing and rooting paths work over the first 16 */
+_Static_assert(SP_PROC_ARG_SLOTS >= 16 && SP_PROC_ARG_SLOTS <= 64, "SP_PROC_ARG_SLOTS wants 16..64");
 extern SP_TLS sp_RbVal _sp_proc_poly_args[SP_PROC_ARG_SLOTS];    /* defined in the generated TU */
 extern SP_TLS sp_RbVal _sp_proc_poly_ret;                        /* defined in the generated TU */
 /* A call wider than the channel: its boxed arguments past the

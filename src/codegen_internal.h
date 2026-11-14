@@ -1902,9 +1902,10 @@ const char *sp_re_literal_error(const char *src, int len, int flags);
 /* The boxed side channel's slot count, as lib/sp_proc.h defines it: the
    emitters that publish arguments into it and the arity they decline past
    must agree with the runtime, not carry their own copy of the number. */
-#ifndef SP_PROC_ARG_SLOTS
-#define SP_PROC_ARG_SLOTS 64
-#endif
+/* 64 unless --proc-arg-slots=N (a small-RAM target builds its runtime with
+   -DSP_PROC_ARG_SLOTS=N; the generated TU checks the two agree) */
+extern int g_proc_arg_slots;
+#define SP_PROC_ARG_SLOTS g_proc_arg_slots
 /* The boxed argument k (a constant) of the call that entered a proc, into
    out: the side channel's slot, or past its SP_PROC_ARG_SLOTS the call's
    wide store (sp_proc_arg) (codegen.c) */

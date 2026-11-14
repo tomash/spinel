@@ -395,7 +395,9 @@ typedef struct{sp_int*keys;sp_int*vals;sp_int*order;sp_bool*used;sp_int len;sp_i
 
 /* Signal table bound (0..64): shared by the trap state in the generated TU
    and the trap machinery in lib/sp_cold.c. */
-#define SP_SIG_MAX 65
+#ifndef SP_SIG_MAX
+#define SP_SIG_MAX 65   /* -DSP_SIG_MAX=1 on a target with no signals: only the EXIT trap (0) */
+#endif
 
 /* The default SIGINT / SIGTERM (#9222) raises where it arrives only inside a
    blocking call the runtime marks with SP_SIG_BLOCKING (a read, a wait, a

@@ -2044,8 +2044,9 @@ sp_PolyArray *sp_str_chars_poly(const char *s) {SP_GC_ROOT_STR(s);
 #define backtrace_symbols(buf, n) ((char **)0)
 #endif
 #include "sp_exc.h"     /* sp_bt_block */
+#include "sp_bt.h"      /* SP_BT_MAX */
 int sp_bt_enabled = 0;          /* set to 1 by debug-build main() */
-void *sp_bt_buf[256];           /* frames captured at the last raise */
+void *sp_bt_buf[SP_BT_MAX];           /* frames captured at the last raise */
 int sp_bt_n = 0;
 const char *sp_bt_srcfile = ""; /* toplevel .rb path, set by debug main() */
 const char *const *sp_bt_files = 0;
@@ -4301,6 +4302,8 @@ void sp_sig_exit_dispatch(void) {
 sp_RbVal sp_signal_trap(sp_RbVal sig, sp_RbVal handler) {SP_GC_ROOT_RBVAL(sig);SP_GC_ROOT_RBVAL(handler);
   handler = sp_rbval_str(handler);
   int no = sp_signal_resolve(sig);
+  if (no < 0 || no >= SP_SIG_MAX)   /* a runtime built with a smaller table (-DSP_SIG_MAX) */
+    sp_raise_cls("ArgumentError", "unsupported signal (runtime built without the signal table)");
   if (no == SIGKILL || no == SIGSTOP)
     sp_raise_cls("Errno::EINVAL",
                  sp_sprintf("Invalid argument - SIG%s", sp_signal_signame(no)));
