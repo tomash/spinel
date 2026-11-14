@@ -534,8 +534,9 @@ void  sp_slab_release_from(int first);   /* the slots from `first` on, under the
    cold-path files make, takes its internal linkage). */
 #include <stdlib.h>
 #include <string.h>
-static inline void *sp_slab_alloc_off(size_t need) { return calloc(1, need); }
-static inline void *sp_slab_alloc_raw_off(size_t need) { return malloc(need); }
+void sp_oom_die(void);   /* lib/sp_gc.c: the slab front's answer to a failed malloc, kept here */
+static inline void *sp_slab_alloc_off(size_t need) { void *p = calloc(1, need); if (!p) sp_oom_die(); return p; }
+static inline void *sp_slab_alloc_raw_off(size_t need) { void *p = malloc(need); if (!p) sp_oom_die(); return p; }
 static inline void sp_slab_free_off(void *p) { free(p); }
 static inline void sp_slab_hdr_off(void *h) { (void)h; }
 static inline int sp_slab_query_off(const void *p) { (void)p; return 0; }

@@ -87,8 +87,11 @@ int sp_gc_str_major_sched = 1;
    does not describe them: pinning that gate changed the old generation from
    57.2 MB to 11.5 MB with the reported full count identical at 6. */
 size_t sp_gc_str_majors = 0;
-size_t sp_str_old_threshold = 1024 * 1024;
-size_t sp_str_old_threshold_init = 1024 * 1024;
+#ifndef SP_GC_STR_MAJOR_KB   /* the old string generation's first gate; -DSP_GC_STR_MAJOR_KB=<n> on a small heap */
+#define SP_GC_STR_MAJOR_KB 1024
+#endif
+size_t sp_str_old_threshold = (size_t)SP_GC_STR_MAJOR_KB * 1024;
+size_t sp_str_old_threshold_init = (size_t)SP_GC_STR_MAJOR_KB * 1024;
 /* How many string sweeps between majors, and the count that drives it. The cadence is a COUNT rather than a size because a
    size gate re-aimed from the old list is aimed at a number the same gate
    produced: a small budget promotes early, promotion is one-way until a major,
@@ -183,8 +186,19 @@ static size_t sp_str_live_total(void) {
   return sp_str_heap_bytes + sp_str_old_total();
 #endif
 }
-size_t sp_str_threshold = 256 * 1024;
-size_t sp_str_threshold_init = 256 * 1024;
+/* The first collection's triggers, and an optional ceiling on every retuned
+   one: a part with a 16 KB heap cannot wait for 256 KB of allocation, nor let
+   the retune float the trigger to a multiple of the live set
+   (-DSP_GC_THRESHOLD_KB=<n>, -DSP_GC_THRESHOLD_CAP_KB=<n>; 0: no ceiling). */
+#ifndef SP_GC_THRESHOLD_KB
+#define SP_GC_THRESHOLD_KB 256
+#endif
+#ifndef SP_GC_THRESHOLD_CAP_KB
+#define SP_GC_THRESHOLD_CAP_KB 0
+#endif
+#define SP_GC_CAP(t) do { if (SP_GC_THRESHOLD_CAP_KB && (t) > (size_t)SP_GC_THRESHOLD_CAP_KB * 1024) (t) = (size_t)SP_GC_THRESHOLD_CAP_KB * 1024; } while (0)
+size_t sp_str_threshold = (size_t)SP_GC_THRESHOLD_KB * 1024;
+size_t sp_str_threshold_init = (size_t)SP_GC_THRESHOLD_KB * 1024;
 int sp_str_stress_checked = 0;
 
 const char sp_str_empty_data[] = "\xff";
@@ -211,8 +225,8 @@ SP_TLS int sp_ffi_bin_len = 0;   /* see sp_alloc.h: byte count for :binstr / :cb
 
 /* Object-heap collection threshold (was per-TU static in spinel_rt.h; now
    shared so sp_gc_alloc can live in sp_alloc.h and lib TUs allocate too). */
-size_t sp_gc_threshold = 256 * 1024;
-size_t sp_gc_threshold_init = 256 * 1024;
+size_t sp_gc_threshold = (size_t)SP_GC_THRESHOLD_KB * 1024;
+size_t sp_gc_threshold_init = (size_t)SP_GC_THRESHOLD_KB * 1024;
 int sp_gc_stress_checked = 0;
 /* Stress pins the threshold instead of merely seeding it: the retunes float
    the trigger to live*4 with the base as a FLOOR, so on any program whose
@@ -368,6 +382,9 @@ static size_t sp_gc_sat_mul(size_t v, size_t k) {
    thresholds and the string heap are visible. */
 static void sp_gc_stats_emit(void);
 static void sp_gc_stats_report(void) {
+#ifdef SP_NO_GC_PHASES
+  return;   /* no GC clock (FPU-less MCUs): the [gc] line is timing too, and its doubles stay out of the link */
+#endif
   static int on = -1;
   static double last = 0;
   if (on < 0) {
@@ -507,7 +524,12 @@ static void sp_gc_stats_emit(void) {
 /* Re-aim the object trigger from what a collection left, and take the
    measurement both budgets' gates start from: the mark's share of that
    collection. The reasoning is inline, beside each step. */
+static void sp_gc_retune_object_in(size_t before);
 void sp_gc_retune_object(size_t before) {
+  sp_gc_retune_object_in(before);
+  SP_GC_CAP(sp_gc_threshold);
+}
+static void sp_gc_retune_object_in(size_t before) {
   sp_gc_stats_report();
   if (sp_gc_stress_pin) { sp_gc_threshold = sp_gc_threshold_init; return; }
   size_t live = sp_gc_bytes;
@@ -629,7 +651,12 @@ static size_t sp_str_retune_young_exclude = 0;
 /* Re-aim the per-worker string trigger from what a sweep left: twice the live
    strings plus the object heap's share of it (below), or twice the pre-sweep
    total when the sweep reclaimed under a quarter of that. */
+static void sp_str_retune_in(size_t before, size_t promoted);
 static void sp_str_retune(size_t before, size_t promoted) {
+  sp_str_retune_in(before, promoted);
+  SP_GC_CAP(sp_str_threshold);
+}
+static void sp_str_retune_in(size_t before, size_t promoted) {
   if (sp_gc_stress_pin || sp_gc_str_budget_fixed) { sp_str_threshold = sp_str_threshold_init; return; }
 #ifdef SP_THREADS
   int nw = sp_active_workers; if (nw < 1) nw = 1;
@@ -1174,6 +1201,7 @@ void sp_str_sweep_end(int major, size_t promoted) {
       sp_str_old_threshold = sp_gc_sat_mul(kept, 2);
       if (sp_str_old_threshold < sp_str_old_threshold_init)
         sp_str_old_threshold = sp_str_old_threshold_init;
+      SP_GC_CAP(sp_str_old_threshold);
       /* Adapt the CADENCE from the survival RATIO. A ratio is scale-free, so
          unlike a size it cannot carry the last major's inflation into the next
          one. A major FORCED by the backstop is not a sample taken on schedule:
